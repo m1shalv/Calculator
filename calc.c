@@ -10,18 +10,52 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
-double parse_expression(const char **p, const char *start_line, int *error, int *error_position);
-double parse_term(const char **p, const char *start_line, int *error, int *error_position);
-double parse_factor(const char **p, const char *start_line, int *error, int *error_position);
+double parse_expression(const char **p, const char *start_line, int *error, int *error_position, int *is_float);
+double parse_term(const char **p, const char *start_line, int *error, int *error_position, int *is_float);
+double parse_power(const char **p, const char *start_line, int *error, int *error_position, int *is_float);
+double parse_factor(const char **p, const char *start_line, int *error, int *error_position, int *is_float);
 
-double parse_factor(const char **p, const char *start_line, int *error, int *error_position){
+double parse_factor(const char **p, const char *start_line, int *error, int *error_position, int *is_float){
     while(isspace((unsigned char)**p)){
         (*p)++;
     }
 
     char *end;
     const char *start = *p;
+
+    if(*start == '-'){
+        *error = 1; 
+        *error_position = (int)(start - start_line)+1;
+        return 0;
+    }
+
+    if(**p == '('){
+        (*p)++;
+        double first = parse_expression(p, start_line, error, error_position, is_float);
+        if(*error){
+            return 0;
+        }
+        while(isspace((unsigned char)**p)){
+            (*p)++;
+        }
+
+        if(**p != ')'){
+            *error = 1;
+            *error_position = (int)(*p - start_line)+1;
+            return 0;
+        }
+        (*p)++;
+        return first;
+    }
+
+    const char *number_start = *p;
+    if(!isdigit((unsigned char)**p)){
+        *error = 1;
+        *error_position = (int)(start - start_line)+1;
+        return 0; 
+    }
     double number = strtod(*p, &end);
+    int dot = 0;
 
     if(end == *p){
         *error = 1;
@@ -29,12 +63,72 @@ double parse_factor(const char **p, const char *start_line, int *error, int *err
         return 0;
     }
 
+        for(const char *q = number_start; q < end; q++){
+        if(*q == '.'){
+            dot = 1;
+            break;
+        }
+    }
+
+    if(dot && *(end-1) == '.'){
+        *error = 1; 
+        *error_position = (int)((end - 1) - start_line)+1;
+        return 0;
+    }
+
+    *is_float = dot;
     *p = end;
     return number;
 }
 
-double parse_term(const char **p, const char *start_line, int *error, int *error_position){
-    double number = parse_factor(p, start_line, error, error_position);
+double parse_power(const char **p, const char *start_line, int *error, int *error_position, int *is_float){
+    int base_is_float = 0; 
+    double number = parse_factor(p, start_line, error, error_position, &base_is_float);
+
+    if(*error){
+        return 0;
+    }
+
+    while(isspace((unsigned char)**p)){
+        (*p)++;
+    }    
+
+    if(**p == '*' && (*p)[1] == '*'){
+        (*p) += 2;
+
+        while(isspace((unsigned char)**p)){
+            (*p)++;
+        }
+
+        const char *exponent_start = *p;
+        int exponent_is_float = 0; 
+        double exponent = parse_power(p, start_line, error, error_position, &exponent_is_float);
+
+        if(*error){
+            return 0;
+        }
+
+        if(!base_is_float && !exponent_is_float && exponent < 0){
+            *error = 1;
+            *error_position = (int)(exponent_start - start_line)+1;
+            return 0;
+        }else{
+            number = pow(number, exponent);
+        }
+
+        if(base_is_float == 1 || exponent_is_float == 1){
+            *is_float = 1;
+        }else{
+            *is_float = 0; 
+        }
+    }
+    *is_float = base_is_float;
+    return number;
+}
+
+double parse_term(const char **p, const char *start_line, int *error, int *error_position, int *is_float){
+    int number_is_float = 0;
+    double number = parse_power(p, start_line, error, error_position, &number_is_float);
     if(*error){
         return 0;
     }
@@ -50,8 +144,8 @@ double parse_term(const char **p, const char *start_line, int *error, int *error
         (*p)++;
 
         const char *start = *p;
-
-        double second = parse_factor(p, start_line, error, error_position);
+        int second_is_float = 0;
+        double second = parse_power(p, start_line, error, error_position, &second_is_float);
 
         if(*error){
             return 0;
@@ -59,22 +153,34 @@ double parse_term(const char **p, const char *start_line, int *error, int *error
 
         if(op == '*'){
             number = number * second;
+            if(number_is_float == 1 || second_is_float == 1){
+                *is_float = 1;
+            }else{
+                *is_float = 0;
+            }
+            number_is_float = *is_float;
         }else if(op == '/'){
             if(second == 0){
                 *error = 1;
                 *error_position = (int)(start-start_line)+1;
                 return 0;
+            }else if(number_is_float == 0 && second_is_float == 0){
+                number = (long long)number / (long long)second; 
+                *is_float = 0;
             }else{
-                number = number / second; 
+                number = number / second;
+                *is_float = 1;
             }
+            number_is_float = *is_float;
         }
     }
-
+    *is_float = number_is_float;
     return number;
 }
 
-double parse_expression(const char **p, const char *start_line, int *error, int *error_position){
-    double number = parse_term(p, start_line, error, error_position);
+double parse_expression(const char **p, const char *start_line, int *error, int *error_position, int *is_float){
+    int number_is_float = 0;
+    double number = parse_term(p, start_line, error, error_position, &number_is_float);
     if(*error){
         return 0;
     }
@@ -89,7 +195,8 @@ double parse_expression(const char **p, const char *start_line, int *error, int 
         char op = **p;
         (*p)++;
 
-        double second = parse_term(p, start_line ,error, error_position);
+        int second_is_float = 0;
+        double second = parse_term(p, start_line, error, error_position, &second_is_float);
 
         if(*error){
             return 0;
@@ -97,11 +204,24 @@ double parse_expression(const char **p, const char *start_line, int *error, int 
 
         if(op == '+'){
             number += second;
+            if(number_is_float == 1 || second_is_float == 1){
+                *is_float = 1;
+            }else{
+                *is_float = 0;
+            }
+            number_is_float = *is_float;
         }else if(op == '-'){
             number -= second;
+            if(number_is_float == 1 || second_is_float == 1){
+                *is_float = 1;
+            }else{
+                *is_float = 0;
+            }
+            number_is_float = *is_float;
         }
 
     }
+    *is_float = number_is_float;
     return number;
 }
 
@@ -212,6 +332,8 @@ int main(int argc, char*argv[]){
     double results[1000];
     int result_count = 0;
 
+    int result_types[1000];
+
     int first_error = 0;
     long error_position_global = 0;
 
@@ -238,13 +360,25 @@ int main(int argc, char*argv[]){
         
         const char *expression = line;
         const char *start_line = expression;
-        double result = parse_expression(&expression, start_line, &error, &error_position);
+        int result_is_float = 0;
+        double result = parse_expression(&expression, start_line, &error, &error_position, &result_is_float);
+
+        while(isspace((unsigned char)*expression)){
+            expression++;
+        }
+
+        if(!error && *expression != '\0'){
+            error =1;
+            error_position = (int)(expression - start_line)+1;
+        }
+
         if(error){
             first_error = 1;
             error_position_global = file_position + error_position;
             break;
         }else{
             results[result_count] = result;
+            result_types[result_count] = result_is_float;
             result_count++;
         }
         file_position += strlen(line);
@@ -254,7 +388,11 @@ int main(int argc, char*argv[]){
         printf("ERROR:%ld\n", error_position_global);
     }else{
         for(int i = 0; i< result_count; i++){
-            printf("%g\n", results[i]);
+            if(result_types[i] == 0){
+                printf("%lld\n", (long long)results[i]);
+            }else{
+                printf("%.15g\n", results[i]);
+            }
         }
     }
 
