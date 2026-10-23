@@ -63,10 +63,13 @@ double parse_factor(const char **p, const char *start_line, int *error, int *err
         return 0;
     }
 
-        for(const char *q = number_start; q < end; q++){
-        if(*q == '.'){
+    for(const char *q = number_start; q < end; q++){
+        if(*q == 'e' || *q == 'E'){
+            *error = 1;
+            *error_position = (int)(q - start_line)+1;
+            return 0;
+        }else if(*q == '.'){
             dot = 1;
-            break;
         }
     }
 
@@ -142,6 +145,10 @@ double parse_term(const char **p, const char *start_line, int *error, int *error
         }
         char op = **p;
         (*p)++;
+
+        while(isspace((unsigned char)**p)){
+            (*p)++;
+        }
 
         const char *start = *p;
         int second_is_float = 0;
